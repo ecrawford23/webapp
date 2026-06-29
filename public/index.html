@@ -105,10 +105,23 @@ h1{font-family:'Poiret One',cursive;font-weight:400;color:var(--navy);font-size:
 .scope{font-size:12.5px;color:#555;margin:0 0 6px;}
 .when{font-size:12px;color:var(--amber);font-weight:500;margin-bottom:10px;}
 .when.od{color:var(--red);font-weight:600;}
+/* ── due date badges ── */
+.duebadge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;letter-spacing:.03em;border-radius:999px;padding:2px 8px;white-space:nowrap;flex-shrink:0;}
+.db-od{background:#fde8e8;color:var(--red);border:1px solid #f5c0c0;}
+.db-today{background:#fde8e8;color:var(--red);border:1px solid #f5c0c0;}
+.db-soon{background:#fdf3e3;color:var(--amber);border:1px solid #f0d8a8;}
+.db-week{background:#edf4ef;color:var(--green);border:1px solid #b8d8be;}
+.db-later{background:#eef2f5;color:var(--muted);border:1px solid #d0dae0;}
 /* ── step list ── */
 .steplist{list-style:none;margin:0 0 10px;padding:0;}
 .steplist li{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:13px;border-bottom:1px solid var(--line);}
 .steplist li:last-child{border-bottom:none;}
+.stepdate{display:inline-block;margin-left:6px;font-size:10px;font-weight:600;letter-spacing:.02em;border-radius:999px;padding:1px 7px;white-space:nowrap;vertical-align:middle;}
+.stepdate.sd-od{background:#fde8e8;color:var(--red);}
+.stepdate.sd-today{background:#fde8e8;color:var(--red);}
+.stepdate.sd-soon{background:#fdf3e3;color:var(--amber);}
+.stepdate.sd-week{background:#edf4ef;color:var(--green);}
+.stepdate.sd-later{background:#eef2f5;color:var(--muted);}
 .scb{appearance:none;-webkit-appearance:none;width:18px;height:18px;min-width:18px;margin-top:1px;border:2px solid var(--coastal);border-radius:5px;cursor:pointer;position:relative;background:#fff;flex-shrink:0;}
 .scb:checked{background:var(--green);border-color:var(--green);}
 .scb:checked::after{content:"";position:absolute;left:4px;top:1px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
@@ -251,6 +264,43 @@ function parseDueDate(t){
   return future.length?future[0]:dates.sort((a,b)=>b-a)[0];
 }
 function isParked(t){ return /\b(parked|on hold)\b/i.test(t.when||""); }
+function isOd(t){ if(t.od)return true; const d=parseDueDate(t); return d?d<today0():false; }
+function daysLeft(t){ const d=parseDueDate(t); if(!d)return null; return Math.round((d-today0())/864e5); }
+function dueBadge(t){
+  if(isParked(t))return '<span class="duebadge db-later">Parked</span>';
+  const d=parseDueDate(t); if(!d)return '';
+  const dl=daysLeft(t); let lbl,cls;
+  if(dl<0){lbl=Math.abs(dl)+'d overdue';cls='db-od';}
+  else if(dl===0){lbl='Due today';cls='db-today';}
+  else if(dl===1){lbl='Due tomorrow';cls='db-soon';}
+  else if(dl<=5){lbl='Due '+fmtChipShort(d);cls='db-soon';}
+  else if(dl<=14){lbl=fmtChipShort(d);cls='db-week';}
+  else{lbl=fmtChipShort(d);cls='db-later';}
+  return '<span class="duebadge '+cls+'">'+lbl+'</span>';
+}
+function fmtChipShort(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+function bizDays(a,b){ const out=[],d=new Date(a); while(d<=b){ const wd=d.getDay(); if(wd!==0&&wd!==6)out.push(new Date(d)); d.setDate(d.getDate()+1); } return out; }
+function stepSchedule(t){
+  const map={},due=parseDueDate(t),rem=[];
+  t.steps.forEach((_,i)=>{ if(!stepDone(t.id,i))rem.push(i); });
+  if(!rem.length||!due)return map;
+  const T=today0(); let dueD=new Date(due); if(dueD<T)dueD=new Date(T);
+  let days=bizDays(T,dueD); if(!days.length)days=[new Date(T)];
+  const n=rem.length,k=days.length;
+  rem.forEach((si,idx)=>{ map[si]=days[Math.min(k-1,Math.floor(idx*k/n))]; });
+  map[rem[n-1]]=days[k-1]; return map;
+}
+function stepDateChip(d){
+  if(!d)return '';
+  const dl=Math.round((d-today0())/864e5); let lbl,cls;
+  if(dl<0){lbl=Math.abs(dl)+'d ago';cls='sd-od';}
+  else if(dl===0){lbl='Today';cls='sd-today';}
+  else if(dl===1){lbl='Tomorrow';cls='sd-soon';}
+  else if(dl<=5){lbl=fmtChipShort(d);cls='sd-soon';}
+  else if(dl<=14){lbl=fmtChipShort(d);cls='sd-week';}
+  else{lbl=fmtChipShort(d);cls='sd-later';}
+  return '<span class="stepdate '+cls+'">'+lbl+'</span>';
+}
 function fmtChip(d){ const T=today0(),diff=Math.round((d-T)/864e5);
   if(diff===0)return "Today"; if(diff===1)return "Tomorrow";
   return d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}); }
@@ -317,35 +367,38 @@ function renderDayPlan(){
 
 /* ====== Card builder ====== */
 function buildCard(t,inDoneBoard){
-  const done=isDone(t),c=counts(t);
+  const done=isDone(t),c=counts(t),od=isOd(t);
   let cls="task";
   if(done) cls+=" done";
   else{
-    if(t.pri==="urgent") cls+=" urgent";
+    if(t.pri==="urgent"||od) cls+=" urgent";
     else if(t.pri==="high") cls+=" high";
-    // default open; respect explicit collapse
     cls+=" open";
     if(state[t.id]&&state[t.id].open===false) cls=cls.replace(" open","");
   }
-  if(!done&&state[t.id]&&state[t.id].open===true) { if(!cls.includes(" open")) cls+=" open"; }
+  if(!done&&state[t.id]&&state[t.id].open===true){ if(!cls.includes(" open"))cls+=" open"; }
   const flag=t.pri==="urgent"?'<span class="flag u">⚑</span>':(t.pri==="high"?'<span class="flag h">●</span>':'');
   const next=nextStepOf(t);
+  const sched=done?{}:stepSchedule(t);
   const steps=t.steps.map((stp,i)=>{
     const ck=stepDone(t.id,i),isNext=(!done&&i===next&&!ck);
-    return '<li class="'+(ck?'checked ':'')+' '+(isNext?'next':'')+'"><input type="checkbox" class="scb" '+(ck?'checked ':'')+' onclick="event.stopPropagation()" onchange="toggleStep(\''+t.id+'\','+i+')"><span>'+stp+'</span></li>';
+    const chip=(!ck&&!done)?stepDateChip(sched[i]):'';
+    return '<li class="'+(ck?'checked ':'')+''+(isNext?'next':'')+'"><input type="checkbox" class="scb" '+(ck?'checked ':'')+' onclick="event.stopPropagation()" onchange="toggleStep(\''+t.id+'\','+i+')"><span>'+stp+chip+'</span></li>';
   }).join("");
+  const badge=done?'':dueBadge(t);
   const card=document.createElement("div"); card.className=cls; card.id="card-"+t.id;
   card.innerHTML=
     '<div class="head" onclick="toggleOpen(\''+t.id+'\')">'
     +'<input type="checkbox" class="cb" '+(done?'checked ':'')+' onclick="event.stopPropagation()" onchange="toggleDone(\''+t.id+'\')">'
     +'<span class="title">'+flag+t.title+'</span>'
+    +badge
     +'<span class="ministep">'+(done?'✓ done':c.d+'/'+c.total+' steps')+'</span>'
     +'<span class="type '+t.type+'">'+t.type+'</span>'
     +'<span class="caret">▶</span>'
     +'</div>'
     +'<div class="body">'
     +(t.scope?'<div class="scope">'+t.scope+'</div>':'')
-    +(t.when?'<div class="when'+(t.od?' od':'')+'">'+t.when+'</div>':'')
+    +(t.when?'<div class="when'+(od?' od':'')+'">'+t.when+'</div>':'')
     +'<ul class="steplist">'+steps+'</ul>'
     +(inDoneBoard?'':'<div class="note" contenteditable="true" data-id="'+t.id+'" data-ph="Notes / where I left off…">'+noteFor(t)+'</div>')
     +'</div>';
